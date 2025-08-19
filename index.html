@@ -1,5 +1,158 @@
 <!doctype html>
-<html lang="de">
-<head><meta charset="utf-8"><title>Zentrale Moderation</title></head>
-<body></body>
-</html>
+<meta charset="utf-8">
+<title>LC Zentrale (extern)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { color-scheme: dark; }
+  body{margin:0;font:14px/1.45 system-ui,Segoe UI,Roboto,Arial;background:#0f1115;color:#e6eefc}
+  .top{display:flex;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid #222;background:#0f1115;position:sticky;top:0}
+  .top strong{font-size:16px}
+  .wrap{display:flex;gap:10px;height:calc(100vh - 50px);padding:12px}
+  .col{display:flex;flex-direction:column;min-width:0}
+  .inbox{width:280px;border-right:1px solid #222;padding-right:10px;overflow:auto}
+  .list{display:grid;gap:8px}
+  .item{background:#1b2135;border:1px solid #2a3451;border-radius:10px;padding:8px;cursor:pointer;text-align:left}
+  .item .p{font-weight:600}
+  .view{flex:1;border:1px solid #222;border-radius:12px;background:#141824;padding:12px;display:flex;flex-direction:column;min-width:0}
+  .msgs{flex:1;overflow:auto}
+  .b{margin:8px 0}
+  .me{opacity:.75}
+  .row{display:flex;gap:8px;margin-top:8px}
+  input[type=text]{flex:1;padding:10px 12px;border-radius:10px;border:1px solid #222;background:#0f1320;color:#fff;outline:none}
+  button{background:#3a7afe;border:0;color:#fff;padding:10px 14px;border-radius:10px;cursor:pointer}
+  .ghost{background:#1f2430;color:#ddd}
+  .pill{font:12px/1.2 system-ui;background:#233656;border-radius:999px;padding:3px 8px;margin-left:6px}
+  .small{font:12px;opacity:.8}
+</style>
+
+<div class="top">
+  <strong>Zentrale Moderation</strong>
+  <span id="stat" class="small">wartet auf Tabs…</span>
+  <span id="clients" class="pill">clients 0</span>
+</div>
+
+<div class="wrap">
+  <div class="inbox col">
+    <div style="font-weight:600;margin-bottom:6px">Eingang</div>
+    <div id="list" class="list"></div>
+  </div>
+
+  <div class="view col">
+    <div id="head" class="small" style="margin-bottom:6px;opacity:.85">Nichts ausgewählt</div>
+    <div id="msgs" class="msgs"></div>
+    <div class="row">
+      <input id="inp" type="text" placeholder="Antwort… (Enter = senden)">
+      <button id="send">Senden</button>
+      <button id="clear" class="ghost">Leeren</button>
+    </div>
+    <div id="info" class="small" style="margin-top:6px"></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const list  = document.getElementById('list');
+  const msgs  = document.getElementById('msgs');
+  const head  = document.getElementById('head');
+  const info  = document.getElementById('info');
+  const inp   = document.getElementById('inp');
+  const sendB = document.getElementById('send');
+  const clearB= document.getElementById('clear');
+  const stat  = document.getElementById('stat');
+  const clientsPill = document.getElementById('clients');
+
+  const esc = s => (s??'').toString().replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+
+  // gespeicherte Clients (Fensterreferenzen)
+  const clients = new Map(); // id -> {win, origin, profile, last}
+  function updateClients(){ clientsPill.textContent = 'clients ' + clients.size; }
+
+  // Eingang + aktueller
+  const queue = [];
+  let current = null;
+
+  function addQueue(m){
+    queue.push(m);
+    renderList();
+    if (!current) pick(0);
+  }
+
+  function renderList(){
+    list.innerHTML='';
+    queue.forEach((m,i)=>{
+      const b=document.createElement('button');
+      b.className='item';
+      b.innerHTML=`<div class="p">${esc(m.profile || 'Profil')}</div>
+                   <div class="small">${new Date(m.ts).toLocaleTimeString()}</div>
+                   <div class="small" style="opacity:.85">${esc(m.text.slice(0,90))}</div>`;
+      b.onclick = ()=>pick(i);
+      list.appendChild(b);
+    });
+    stat.textContent = `offen: ${queue.length}`;
+  }
+
+  function pick(i){
+    const m = queue.splice(i,1)[0];
+    if (!m) return;
+    current = m;
+    renderList();
+    head.textContent = `${m.profile} — ${new Date(m.ts).toLocaleString()}`;
+    msgs.innerHTML   = `<div class="b">${esc(m.text)}</div>`;
+    inp.focus();
+  }
+
+  function addLine(who, text){
+    const d=document.createElement('div');
+    d.className='b ' + (who==='Du'?'me':'');
+    d.innerHTML = `<span style="opacity:.7">${esc(who)}:</span> ${esc(text)}`;
+    msgs.appendChild(d);
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function sendNow(){
+    const v=(inp.value||'').trim();
+    if(!v || !current) return;
+    const c = clients.get(current.clientId);
+    if(!c){ info.textContent='Client nicht mehr verbunden.'; return; }
+    const reqId = Math.random().toString(36).slice(2);
+    try {
+      c.win.postMessage({__LCX__:1, type:'REPLY', text:v, clientId: current.clientId, reqId}, '*');
+      addLine('Du', v);
+      inp.value='';
+      info.textContent='gesendet…';
+    } catch(e){ info.textContent='Senden fehlgeschlagen.'; }
+  }
+
+  sendB.onclick = sendNow;
+  inp.addEventListener('keydown', e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendNow(); }});
+  clearB.onclick = ()=>{ msgs.innerHTML=''; head.textContent='Nichts ausgewählt'; current=null; };
+
+  // Nachrichten von LC-Tabs
+  window.addEventListener('message', (ev)=>{
+    const d = ev.data || {};
+    if (!d.__LCX__) return;
+
+    if (d.type==='HELLO'){
+      clients.set(d.clientId, {win: ev.source, origin: ev.origin, profile: d.profile || 'Profil', last: Date.now()});
+      updateClients();
+      ev.source.postMessage({__LCX__:1, type:'HELLO_ACK'}, '*');
+      return;
+    }
+
+    if (d.type==='NEW'){
+      // Quelle merken/aktualisieren
+      if (!clients.has(d.clientId)) clients.set(d.clientId, {win: ev.source, origin: ev.origin, profile: d.profile, last: Date.now()});
+      else { clients.get(d.clientId).last = Date.now(); clients.get(d.clientId).profile = d.profile; }
+      updateClients();
+      addQueue(d);
+      return;
+    }
+
+    if (d.type==='DELIVERED' && current && d.clientId===current.clientId){
+      info.textContent = 'zugestellt ' + new Date(d.ts||Date.now()).toLocaleTimeString();
+      setTimeout(()=> info.textContent='', 2000);
+      return;
+    }
+  });
+})();
+</script>
