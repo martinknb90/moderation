@@ -1,112 +1,119 @@
-// ==UserScript==
-// @name         LC Hub Client (minimal)
-// @namespace    lc/ext
-// @version      1.1
-// @description  Schickt eingehende Nachrichten an die externe Hub-Seite; Antworten kommen zurück in den Tab.
-// @match        https://livecreator.com/*
-// @match        https://www.livecreator.com/*
-// @run-at       document-idle
-// @grant        none
-// ==/UserScript==
+<!doctype html>
+<meta charset="utf-8">
+<title>LC Zentrale</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root{color-scheme:dark}
+  body{margin:0;background:#0f1115;color:#e6eefc;font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
+  header{display:flex;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid #222}
+  .pill{font:12px;background:#233656;border-radius:999px;padding:3px 8px}
+  .wrap{display:flex;gap:10px;height:calc(100vh - 50px);padding:12px}
+  .inbox{width:300px;border-right:1px solid #222;padding-right:10px;overflow:auto}
+  .item{background:#1b2135;border:1px solid #2a3451;border-radius:10px;padding:8px;cursor:pointer;margin-bottom:8px;text-align:left}
+  .small{opacity:.8;font-size:12px}
+  .view{flex:1;border:1px solid #222;border-radius:12px;background:#141824;padding:12px;display:flex;flex-direction:column;min-width:0}
+  .msgs{flex:1;overflow:auto}
+  .row{display:flex;gap:6px;margin-top:8px}
+  input{flex:1;padding:10px 12px;border-radius:10px;border:1px solid #222;background:#0f1320;color:#fff;outline:none}
+  button{background:#3a7afe;border:0;color:#fff;padding:10px 14px;border-radius:10px;cursor:pointer}
+  button.ghost{background:#1f2430;color:#ddd}
+</style>
 
+<header>
+  <strong>LC Zentrale</strong>
+  <span id="status" class="small">warte auf Tabs…</span>
+  <span id="clients" class="pill">clients 0</span>
+</header>
+
+<div class="wrap">
+  <div class="inbox">
+    <div style="font-weight:600;margin-bottom:6px">Eingang</div>
+    <div id="list"></div>
+  </div>
+
+  <div class="view">
+    <div id="head" class="small">Nichts ausgewählt</div>
+    <div id="msgs" class="msgs"><div class="small" style="opacity:.7">Noch keine Nachricht.</div></div>
+    <div class="row">
+      <input id="inp" placeholder="Antwort… (Enter)">
+      <button id="send">Senden</button>
+      <button id="clear" class="ghost">Leeren</button>
+    </div>
+    <div id="info" class="small" style="margin-top:6px"></div>
+  </div>
+</div>
+
+<script>
 (() => {
-  'use strict';
-  const HUB_URL = 'https://martinknb90.github.io/moderation/'; // deine Hub-Seite
+  try{ if(window.name!=='LC_HUB') window.name='LC_HUB'; }catch{}
+  const list = document.getElementById('list');
+  const msgs = document.getElementById('msgs');
+  const head = document.getElementById('head');
+  const status = document.getElementById('status');
+  const info = document.getElementById('info');
+  const inp = document.getElementById('inp');
+  const sendBtn = document.getElementById('send');
+  const clearBtn = document.getElementById('clear');
+  const clientsBadge = document.getElementById('clients');
+  const esc = s => (s??'').toString().replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 
-  const ID = sessionStorage.getItem('LCX_ID') || (sessionStorage.setItem('LCX_ID', Math.random().toString(36).slice(2)), sessionStorage.getItem('LCX_ID'));
-  const txt = el => (el?.innerText || el?.textContent || '').trim();
+  const clients = new Map(); // clientId -> {win, last, profile}
+  const queue = [];
+  let current = null;
+  function updClients(){ clientsBadge.textContent = 'clients ' + clients.size; }
 
-  // kleines Badge
-  const badge=document.createElement('div');
-  Object.assign(badge.style,{position:'fixed',top:'8px',right:'8px',zIndex:999999,background:'#a60',color:'#fff',padding:'6px 8px',borderRadius:'8px',font:'12px system-ui',cursor:'pointer'});
-  badge.textContent='Hub öffnen';
-  badge.onclick=()=>{ try{ window.open(HUB_URL,'LC_HUB'); }catch{} };
-  document.body.appendChild(badge);
-
-  let helloAck=false;
-  function getHub(){ try{ const w=window.open('','LC_HUB'); return (w && !w.closed) ? w : null; }catch{ return null; } }
-  function helloLoop(){
-    const send=()=>{ const hub=getHub(); if(hub) hub.postMessage({__LCX__:1,type:'HELLO',clientId:ID,profile:getProfile()},'*'); };
-    const t=setInterval(send,1500); send();
-    const onMsg=(ev)=>{ const d=ev.data||{}; if(d.__LCX__ && d.type==='HELLO_ACK'){ helloAck=true; badge.style.background='#0a0'; badge.textContent='Hub verbunden'; badge.style.cursor='default'; badge.onclick=null; clearInterval(t); window.removeEventListener('message',onMsg); } };
-    window.addEventListener('message',onMsg);
-  }
-  // wenn Hub bereits offen → verbinden, sonst Button lassen
-  if (getHub()) helloLoop();
-
-  function getProfile(doc=document){
-    const c = doc.querySelector('.user-name, .dialog-head .user-name, .dialog-head .name, [class*="user-name"], .userbox-inner .user-name');
-    const t = txt(c); if (t) return t;
-    const title=(doc.title||'').replace(/\s+[-–|].*$/,'').trim();
-    return title||'Profil';
-  }
-
-  const SEEN = new Set();
-  const MSG = [
-    '.chat-message.type-sender .msg > span.message.special > span',
-    '.chat-message.type-sender .msg .message > span',
-    '.chat-message.type-sender .msg',
-    '.message.incoming .message-text',
-    '.message:not(.outgoing) .message-text',
-    '.msg.in .text',
-    '[class*="incoming"] .text',
-    '.chat_message','.message-text','.text'
-  ];
-  const LIST = ['.ons-scroll-content','.messages-list','.chat-content','.chatbox','[class*="scroll"]'];
-
-  function startIn(doc){
-    let target=doc.body;
-    for(const s of LIST){ try{ const t=doc.querySelector(s); if(t){ target=t; break; } }catch{} }
-    const push=(node)=>{
-      const content=txt(node); if(!content) return;
-      const key=(node.getAttribute?.('data-id')||'')+'::'+content.slice(0,160);
-      if(SEEN.has(key)) return;
-      const box=node.closest?.('.chat-message');
-      const c=(box?.className||'')+' '+(node.className||'');
-      if(/type-user|outgoing|own|self|right/i.test(c)) return; // nur eingehend
-      SEEN.add(key);
-      try{ const hub=getHub(); hub && hub.postMessage({__LCX__:1,type:'NEW',clientId:ID,profile:getProfile(doc),text:content,ts:Date.now()},'*'); }catch{}
-    };
-    const mo=new MutationObserver(muts=>{
-      muts.forEach(m=>m.addedNodes.forEach(n=>{
-        if(n.nodeType!==1) return;
-        for(const s of MSG){
-          try{
-            if(n.matches?.(s)){ push(n); break; }
-            const hit=n.querySelector?.(s); if(hit){ push(hit); break; }
-          }catch{}
-        }
-      }));
+  function renderList(){
+    list.innerHTML='';
+    queue.forEach((m,i)=>{
+      const el=document.createElement('button');
+      el.className='item';
+      el.innerHTML=`<div style="font-weight:600">${esc(m.profile||'Profil')}</div>
+                    <div class="small">${new Date(m.ts).toLocaleTimeString()}</div>
+                    <div class="small" style="opacity:.85">${esc(m.text.slice(0,90))}</div>`;
+      el.onclick=()=>pick(i);
+      list.appendChild(el);
     });
-    try{ mo.observe(target,{childList:true,subtree:true}); }catch{}
-    setInterval(()=>{ for(const s of MSG){ try{ doc.querySelectorAll(s).slice(-2).forEach(push); }catch{} } },2000);
+    status.textContent = `offen: ${queue.length}`;
   }
-
-  startIn(document);
-  document.querySelectorAll('iframe').forEach(f=>{ try{ f.contentDocument && startIn(f.contentDocument); }catch{} });
-
-  function findInput(doc){ return doc.querySelector('textarea, input[placeholder*="Nachricht"], input[type="text"]'); }
-  function findSend(doc){
-    const byText=[...doc.querySelectorAll('button')].find(b=>(b.textContent||'').trim().toLowerCase().includes('senden'));
-    return byText || doc.querySelector('button.send, button[type="submit"], button[aria-label="Send"]');
+  function pick(i){
+    const m=queue.splice(i,1)[0]; if(!m) return;
+    current=m; renderList();
+    head.textContent = `${m.profile} – ${new Date(m.ts).toLocaleString()}`;
+    msgs.innerHTML = `<div><span class="small" style="opacity:.7">Kunde:</span> ${esc(m.text)}</div>`;
+    inp.focus();
   }
+  function addLine(who, text){
+    const d=document.createElement('div');
+    d.innerHTML=`<span class="small" style="opacity:.7">${esc(who)}:</span> ${esc(text)}`;
+    msgs.appendChild(d); msgs.scrollTop=msgs.scrollHeight;
+  }
+  function sendNow(){
+    const v=(inp.value||'').trim(); if(!v||!current) return;
+    const c=clients.get(current.clientId); if(!c){ info.textContent='Client getrennt.'; return; }
+    const reqId=Math.random().toString(36).slice(2);
+    try{ c.win.postMessage({__LCX__:1,type:'REPLY',clientId:current.clientId,text:v,reqId},'*'); addLine('Du', v); inp.value=''; info.textContent='gesendet…'; }catch{}
+  }
+  sendBtn.onclick=sendNow;
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendNow(); }});
+  clearBtn.onclick=()=>{ msgs.innerHTML=''; head.textContent='Nichts ausgewählt'; current=null; };
 
   window.addEventListener('message',(ev)=>{
     const d=ev.data||{}; if(!d.__LCX__) return;
-    if(d.type==='REPLY' && d.clientId===ID){
-      let ok=false;
-      const docs=[document]; document.querySelectorAll('iframe').forEach(f=>{ try{ if(f.contentDocument) docs.push(f.contentDocument); }catch{} });
-      for(const doc of docs){
-        try{
-          const inp=findInput(doc); if(!inp) continue;
-          inp.focus(); inp.value=d.text;
-          inp.dispatchEvent(new Event('input',{bubbles:true}));
-          inp.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:'Enter'}));
-          const btn=findSend(doc); if(btn) setTimeout(()=>btn.click(),50);
-          ok=true; break;
-        }catch{}
-      }
-      try{ const hub=getHub(); hub && hub.postMessage({__LCX__:1,type:'DELIVERED',clientId:ID,reqId:d.reqId,ok,ts:Date.now()},'*'); }catch{}
+    if(d.type==='HELLO'){
+      clients.set(d.clientId,{win:ev.source,last:Date.now(),profile:d.profile||'Profil'});
+      updClients(); ev.source.postMessage({__LCX__:1,type:'HELLO_ACK'},'*'); return;
+    }
+    if(d.type==='NEW'){
+      if(!clients.has(d.clientId)) clients.set(d.clientId,{win:ev.source,last:Date.now(),profile:d.profile});
+      else { const c=clients.get(d.clientId); c.last=Date.now(); c.profile=d.profile; }
+      updClients();
+      queue.push(d); renderList(); if(!current) pick(0);
+      return;
+    }
+    if(d.type==='DELIVERED' && current && d.clientId===current.clientId){
+      info.textContent = 'zugestellt ' + new Date(d.ts||Date.now()).toLocaleTimeString();
+      setTimeout(()=>info.textContent='',1500);
     }
   });
 })();
+</script>
