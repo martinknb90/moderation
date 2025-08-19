@@ -1,130 +1,208 @@
 <!doctype html>
+<html lang="de">
+<head>
 <meta charset="utf-8" />
-<title>LC Zentrale (extern)</title>
 <meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>LC Hub – Zentrale Moderationsmaske</title>
 <style>
-  :root{color-scheme:dark}
-  body{margin:0;background:#0f1115;color:#e6eefc;font:14px/1.45 system-ui,Segoe UI,Roboto,Arial}
-  header{display:flex;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid #222}
-  .pill{font:12px;background:#233656;border-radius:999px;padding:3px 8px}
-  .wrap{display:flex;gap:10px;height:calc(100vh - 50px);padding:12px}
-  .inbox{width:280px;border-right:1px solid #222;padding-right:10px;overflow:auto}
-  .list{display:grid;gap:8px}
-  .item{background:#1b2135;border:1px solid #2a3451;border-radius:10px;padding:8px;text-align:left;cursor:pointer}
-  .small{font-size:12px;opacity:.8}
-  .view{flex:1;border:1px solid #222;border-radius:12px;background:#141824;padding:12px;display:flex;flex-direction:column}
-  .msgs{flex:1;overflow:auto}
-  .row{display:flex;gap:6px;margin-top:8px}
-  input{flex:1;padding:10px 12px;border-radius:10px;border:1px solid #222;background:#0f1320;color:#fff}
-  button{background:#3a7afe;border:0;color:#fff;padding:10px 14px;border-radius:10px;cursor:pointer}
-  .ghost{background:#1f2430;color:#ddd}
+  :root { --bg:#0f1220; --fg:#eef1ff; --muted:#a8b0d6; --card:#181c2f; --accent:#7aa2ff; }
+  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,Segoe UI,Roboto,Helvetica,Arial}
+  .app{display:grid;grid-template-columns:280px 1fr 300px; gap:12px; height:100vh; padding:12px}
+  .col{background:var(--card);border-radius:14px;overflow:auto;box-shadow:0 6px 18px rgba(0,0,0,.35)}
+  h2{margin:12px 14px;font-size:16px;color:var(--muted)}
+  .queue{padding:8px}
+  .item{padding:10px 12px;border-radius:12px;margin:8px;background:#101325;cursor:pointer;border:1px solid transparent}
+  .item:hover{border-color:var(--accent)}
+  .item .meta{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:12px}
+  .item .preview{margin-top:6px;color:#dfe4ff}
+  .chat{display:flex;flex-direction:column;height:100%}
+  .chat-body{flex:1;overflow:auto;padding:16px}
+  .bubble{max-width:72%;padding:10px 12px;border-radius:14px;margin:6px 0;word-wrap:break-word;white-space:pre-wrap}
+  .me{margin-left:auto;background:#23315b}
+  .them{margin-right:auto;background:#222638}
+  .chat-input{display:flex;gap:8px;padding:12px;border-top:1px solid #232844}
+  textarea{flex:1;min-height:46px;max-height:160px;padding:10px;border-radius:10px;border:1px solid #2a3156;background:#0f1428;color:var(--fg);resize:vertical}
+  button{background:var(--accent);color:#0b1022;border:0;border-radius:10px;padding:10px 14px;font-weight:600;cursor:pointer}
+  .right{padding:12px}
+  .row{display:grid;grid-template-columns:100px 1fr; gap:8px; padding:6px 0; border-bottom:1px dashed #2b3157}
+  .pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#222a4a;color:var(--muted);margin-right:6px}
+  .topbar{display:flex;align-items:center;gap:10px;padding:10px;border-bottom:1px solid #232844}
+  .status{width:10px;height:10px;border-radius:50%;background:#666}
+  .status.ok{background:#42d392}
+  .small{color:var(--muted);font-size:12px}
 </style>
-
-<header>
-  <strong>Zentrale Moderation</strong>
-  <span id="stat" class="small">bereit</span>
-  <span id="clients" class="pill">clients 0</span>
-</header>
-
-<div class="wrap">
-  <aside class="inbox">
-    <div style="font-weight:600;margin-bottom:6px">Eingang</div>
-    <div id="list" class="list"></div>
-  </aside>
-
-  <main class="view">
-    <div id="head" class="small" style="margin-bottom:6px;opacity:.85">Nichts ausgewählt</div>
-    <div id="msgs" class="msgs"></div>
-    <div class="row">
-      <input id="inp" type="text" placeholder="Antwort… (Enter = senden)" />
-      <button id="send">Senden</button>
-      <button id="clear" class="ghost">Leeren</button>
+</head>
+<body>
+<div class="app">
+  <!-- Liste / Queue -->
+  <div class="col">
+    <div class="topbar">
+      <div class="status" id="status"></div>
+      <div><strong>Verbindungen</strong> <span class="small" id="conCount">(0)</span></div>
+      <div class="small" style="margin-left:auto">F5 = neu verbinden</div>
     </div>
-    <div id="info" class="small" style="margin-top:6px;opacity:.85"></div>
-  </main>
+    <h2>Eingang</h2>
+    <div class="queue" id="queue"></div>
+  </div>
+
+  <!-- Chat -->
+  <div class="col chat">
+    <div class="topbar"><strong id="threadTitle">–</strong><span class="small" id="originLabel" style="margin-left:8px;color:#a0a9d9"></span></div>
+    <div class="chat-body" id="chatBody"></div>
+    <div class="chat-input">
+      <textarea id="reply" placeholder="Antwort schreiben… (Enter = senden, Shift+Enter = Zeilenumbruch)"></textarea>
+      <button id="sendBtn">Senden</button>
+    </div>
+  </div>
+
+  <!-- Rechts Infos -->
+  <div class="col right">
+    <h2>Details</h2>
+    <div id="details"></div>
+  </div>
 </div>
 
 <script>
-(() => {
-  // wichtig: fester Fenstername, damit Tabs das EXISTIERENDE Hub-Fenster finden
-  try { if (window.name !== 'LC_HUB') window.name = 'LC_HUB'; } catch {}
+/** Zentrale Datenhaltung **/
+const store = {
+  // key = threadId; value = { profile, customer, messages:[], lastAt, sourceWindow, sourceId }
+  threads: new Map(),
+  // Quellfenster: sourceId -> Window
+  sources: new Map(),
+  selected: null
+};
 
-  const list = document.getElementById('list');
-  const msgs = document.getElementById('msgs');
-  const head = document.getElementById('head');
-  const info = document.getElementById('info');
-  const stat = document.getElementById('stat');
-  const clientsPill = document.getElementById('clients');
-  const inp = document.getElementById('inp');
-  const send = document.getElementById('send');
-  const clearB = document.getElementById('clear');
+const els = {
+  queue: document.getElementById('queue'),
+  chatBody: document.getElementById('chatBody'),
+  reply: document.getElementById('reply'),
+  sendBtn: document.getElementById('sendBtn'),
+  details: document.getElementById('details'),
+  conCount: document.getElementById('conCount'),
+  status: document.getElementById('status'),
+  threadTitle: document.getElementById('threadTitle'),
+  originLabel: document.getElementById('originLabel')
+};
 
-  const clients = new Map(); // clientId -> {win, origin, profile, last}
-  const queue = [];
-  let current = null;
+function fmtTime(ts){const d=new Date(ts);return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}
 
-  const esc = s => (s??'').toString().replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-  const updateClients = () => clientsPill.textContent = 'clients ' + clients.size;
-
-  function renderList(){
-    list.innerHTML='';
-    queue.forEach((m,i)=>{
-      const b=document.createElement('button');
-      b.className='item';
-      b.innerHTML=`<div style="font-weight:600">${esc(m.profile||'Profil')}</div>
-                   <div class="small">${new Date(m.ts).toLocaleTimeString()}</div>
-                   <div class="small" style="opacity:.85">${esc(m.text.slice(0,90))}</div>`;
-      b.onclick=()=>pick(i);
-      list.appendChild(b);
-    });
-    stat.textContent = 'offen: ' + queue.length;
+/** Rendering **/
+function renderQueue(){
+  els.queue.innerHTML = '';
+  // sort by lastAt desc
+  const list = [...store.threads.values()].sort((a,b)=>b.lastAt-a.lastAt);
+  for(const t of list){
+    const div = document.createElement('div');
+    div.className = 'item';
+    div.dataset.tid = t.threadId;
+    div.innerHTML = `
+      <div class="meta">
+        <span class="pill">${t.profile}</span>
+        <strong>${t.customer}</strong>
+        <span class="small" style="margin-left:auto">${fmtTime(t.lastAt)}</span>
+      </div>
+      <div class="preview">${(t.messages.at(-1)?.text||'').slice(0,160)}</div>
+    `;
+    div.onclick = ()=>selectThread(t.threadId);
+    els.queue.appendChild(div);
   }
-  function pick(i){
-    const m = queue.splice(i,1)[0];
-    if (!m) return;
-    current = m; renderList();
-    head.textContent = `${m.profile} — ${new Date(m.ts).toLocaleString()}`;
-    msgs.innerHTML = `<div>${esc(m.text)}</div>`;
-    inp.focus();
-  }
-  function addLine(who, text){
-    const d=document.createElement('div');
-    d.innerHTML = `<span style="opacity:.7">${esc(who)}:</span> ${esc(text)}`;
-    msgs.appendChild(d); msgs.scrollTop = msgs.scrollHeight;
-  }
-  function sendNow(){
-    const v=(inp.value||'').trim(); if(!v||!current) return;
-    const c=clients.get(current.clientId); if(!c){ info.textContent='Client weg.'; return; }
-    const reqId=Math.random().toString(36).slice(2);
-    c.win.postMessage({__LCX__:1,type:'REPLY',text:v,clientId:current.clientId,reqId},'*');
-    addLine('Du', v); inp.value=''; info.textContent='gesendet…';
-  }
-  send.onclick=sendNow;
-  inp.addEventListener('keydown', e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); sendNow(); }});
-  clearB.onclick = ()=>{ msgs.innerHTML=''; head.textContent='Nichts ausgewählt'; current=null; };
+}
 
-  // postMessage-Eingang
-  window.addEventListener('message',(ev)=>{
-    const d=ev.data||{}; if(!d.__LCX__) return;
+function renderChat(t){
+  els.chatBody.innerHTML = '';
+  if(!t){ els.threadTitle.textContent = '–'; els.originLabel.textContent=''; return; }
+  els.threadTitle.textContent = `${t.customer}`;
+  els.originLabel.textContent = `von: ${t.profile}`;
+  for(const m of t.messages){
+    const b = document.createElement('div');
+    b.className = `bubble ${m.from==='me'?'me':'them'}`;
+    b.textContent = `[${fmtTime(m.at)}] ${m.text}`;
+    els.chatBody.appendChild(b);
+  }
+  els.chatBody.scrollTop = els.chatBody.scrollHeight;
+  els.details.innerHTML = `
+    <div class="row"><div>Profil</div><div>${t.profile}</div></div>
+    <div class="row"><div>Kunde</div><div>${t.customer}</div></div>
+    <div class="row"><div>Thread-ID</div><div>${t.threadId}</div></div>
+    <div class="row"><div>Quelle</div><div>${t.sourceId||'–'}</div></div>
+  `;
+}
 
-    if (d.type==='HELLO'){
-      clients.set(d.clientId,{win:ev.source,origin:ev.origin,profile:d.profile||'Profil',last:Date.now()});
-      updateClients();
-      ev.source.postMessage({__LCX__:1,type:'HELLO_ACK'},'*');
-      return;
-    }
-    if (d.type==='NEW'){
-      if(!clients.has(d.clientId)) clients.set(d.clientId,{win:ev.source,origin:ev.origin,profile:d.profile,last:Date.now()});
-      else { const c=clients.get(d.clientId); c.last=Date.now(); c.profile=d.profile; }
-      updateClients();
-      queue.push(d);
-      if(!current) pick(0); else renderList();
-      return;
-    }
-    if (d.type==='DELIVERED' && current && d.clientId===current.clientId){
-      info.textContent='zugestellt '+new Date(d.ts||Date.now()).toLocaleTimeString();
-      setTimeout(()=>info.textContent='',2000);
-    }
-  });
-})();
+function selectThread(id){
+  store.selected = id;
+  renderChat(store.threads.get(id) || null);
+}
+
+function addMessage(payload, sourceWindow, sourceId){
+  const { profile, customer, text, from, threadId, at } = payload;
+  if(!store.sources.has(sourceId)) store.sources.set(sourceId, sourceWindow);
+  let t = store.threads.get(threadId);
+  if(!t){
+    t = { threadId, profile, customer, messages:[], lastAt:Date.now(), sourceWindow, sourceId };
+    store.threads.set(threadId, t);
+  }
+  t.messages.push({ text, from, at: at || Date.now() });
+  t.lastAt = Date.now();
+  renderQueue();
+  if(store.selected === threadId) renderChat(t);
+}
+
+function sendReply(){
+  const t = store.threads.get(store.selected);
+  if(!t) return;
+  const text = els.reply.value.trim();
+  if(!text) return;
+  els.reply.value = '';
+  // lokal rendern
+  t.messages.push({ text, from:'me', at: Date.now() });
+  renderChat(t);
+
+  // Antwort an den Ursprungstab senden
+  const src = store.sources.get(t.sourceId);
+  if(src && src.postMessage){
+    src.postMessage({ type:'LC_SEND', threadId: t.threadId, text }, '*');
+  } else {
+    alert('Ursprungs-Tab nicht erreichbar. Bitte Tab aktualisieren.');
+  }
+}
+
+els.sendBtn.onclick = sendReply;
+els.reply.addEventListener('keydown', (e)=>{
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendReply(); }
+});
+
+/** Verbindungen / Heartbeat **/
+let heartbeatOk = false;
+setInterval(()=>{ els.status.classList.toggle('ok', heartbeatOk); heartbeatOk=false; }, 1500);
+
+/** Nachrichten vom/zu Tabs **/
+window.addEventListener('message', (event)=>{
+  const msg = event.data || {};
+  if(!msg.type) return;
+
+  if(msg.type==='LC_HELLO'){
+    // neue Quelle bekannt geben
+    heartbeatOk=true;
+    store.sources.set(msg.sourceId, event.source);
+    els.conCount.textContent = `(${store.sources.size})`;
+    // ack
+    event.source.postMessage({ type:'LC_ACK', ack:true, hubTitle:document.title }, '*');
+    return;
+  }
+
+  if(msg.type==='LC_PING'){
+    heartbeatOk=true;
+    return;
+  }
+
+  if(msg.type==='LC_MESSAGE'){
+    heartbeatOk=true;
+    addMessage(msg.payload, event.source, msg.sourceId);
+    return;
+  }
+});
+
 </script>
+</body>
+</html>
+
